@@ -4,16 +4,16 @@
     "created" : 1578447019609.000,
     "dirty" : false,
     "encoding" : "UTF-8",
-    "folds" : "",
-    "hash" : "891383764",
+    "folds" : "385|47|396|2|\n434|28|451|2|\n",
+    "hash" : "3155679194",
     "id" : "D84EC407",
-    "lastKnownWriteTime" : 1578464647,
-    "last_content_update" : 1578464647092,
+    "lastKnownWriteTime" : 1578465216,
+    "last_content_update" : 1578465216673,
     "path" : "~/GitHub/TopSolo/app.R",
     "project_path" : "app.R",
     "properties" : {
-        "cursorPosition" : "512,0",
-        "scrollLine" : "458"
+        "cursorPosition" : "124,16",
+        "scrollLine" : "124"
     },
     "read_only" : false,
     "read_only_alternatives" : [

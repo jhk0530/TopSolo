@@ -198,15 +198,6 @@ normalize <- function(v) {
   (v - mean(v)) / sd(v)
 }
 
-colLab <- function(n) {
-  if (is.leaf(n)) {
-    a <- attributes(n)
-    labCol <- labelColors[clusMember[which(names(clusMember) == a$label)]]
-    attr(n, "nodePar") <- c(a$nodePar, lab.col = labCol)
-  }
-  n
-}
-
 APIkey <- "RGAPI-b588d0d9-da65-4692-a6b1-8e3fa9b68eef"
 
 myDashboardHeader <- function() {
@@ -384,28 +375,31 @@ server <- function(input, output, session) {
     arrange(desc(Picked))
   pickrate$Picked <- normalize(pickrate$Picked)
 
-  mf <- median(myres$Fun)
-  mw <- median(myres$WinRate)
-
-  groups <- sapply(1:nrow(myres), function(i) {
-    if (myres$Fun[i] > mf) {
-      if (myres$WinRate[i] > mw) {
-        return("Fun - Win")
-      }
-      return("Fun - NoWin")
-    }
-    if (myres$WinRate[i] > mw) {
-      return("NoFun - Win")
-    }
-    return("NoFun - NoWin ")
-  })
-
   myres <- topness %>%
     right_join(winrate) %>%
     right_join(pickrate) %>%
-    arrange(Champ) %>%
-    cbind(Groups = groups) # 104 * 5
+    arrange(Champ) 
+  
+  mf <- median(myres$Fun)
+  mw <- median(myres$WinRate)
+  
+  groups <- sapply(1:nrow(myres), function(i) {
+      if (myres$Fun[i] > mf) {
+          if (myres$WinRate[i] > mw) {
+              return("Fun - Win")
+          }
+          return("Fun - NoWin")
+      }
+      if (myres$WinRate[i] > mw) {
+          return("NoFun - Win")
+      }
+      return("NoFun - NoWin ")
+  })
 
+  myres <- myres %>%
+      cbind(Groups = groups) # 104 * 5
+  
+  
   observeEvent(input$Githublink, {
     shinyjs::runjs("window.open('https://github.com/jhk0530', '_blank')")
   })
@@ -497,6 +491,15 @@ server <- function(input, output, session) {
   tree <- hclust(dist(myres[, 2:4]))
   tree$labels <- myres$Champ
 
+  colLab <- function(n) {
+      if (is.leaf(n)) {
+          a <- attributes(n)
+          labCol <- labelColors[clusMember[which(names(clusMember) == a$label)]]
+          attr(n, "nodePar") <- c(a$nodePar, lab.col = labCol)
+      }
+      n
+  }
+  
   labelColors <- hcl.colors(6, palette = "set 2")
 
   clusMember <- cutree(tree, 6)

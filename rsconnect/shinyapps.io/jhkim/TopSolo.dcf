@@ -1,0 +1,12 @@
+name: TopSolo
+title: TopSolo
+username:
+account: jhkim
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1635813
+bundleId: 2713711
+url: https://jhkim.shinyapps.io/TopSolo/
+when: 1578465241.87777
+asMultiple: FALSE
+asStatic: FALSE
