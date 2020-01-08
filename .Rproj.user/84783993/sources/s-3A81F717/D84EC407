@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1578447019609.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "891383764",
+    "id" : "D84EC407",
+    "lastKnownWriteTime" : 1578464647,
+    "last_content_update" : 1578464647092,
+    "path" : "~/GitHub/TopSolo/app.R",
+    "project_path" : "app.R",
+    "properties" : {
+        "cursorPosition" : "512,0",
+        "scrollLine" : "458"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

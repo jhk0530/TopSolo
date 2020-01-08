@@ -1,0 +1,512 @@
+library(shiny)
+library(semantic.dashboard)
+library(shinyjs)
+library(googleVis)
+
+library(httr)
+library(rvest)
+
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(DT)
+
+cat("Check using Fresh APIkey\n")
+
+getIDbySummonerName <- function(name, APIkey) {
+  url <- URLencode(paste0("https://kr.api.riotgames.com/lol/summoner/v4/summoners/by-name/", name, "?api_key=", APIkey))
+  jsonObj <- getJSONfromURL(url)
+  jsonObj$accountId
+}
+
+getChampList <- function() {
+  url <- "https://ddragon.leagueoflegends.com/api/versions.json"
+  latestVersion <- unlist(getJSONfromURL(url))[1]
+  cat("Champion ID version :", latestVersion, "\n")
+  url <- paste0("http://ddragon.leagueoflegends.com/cdn/", latestVersion, "/data/en_US/champion.json")
+  jsonObj <- getJSONfromURL(url)
+  champs <- jsonObj$data
+  res <- c()
+  for (i in 1:length(champs)) {
+    res <- rbind(res, c(champs[[i]]$key, champs[[i]]$id))
+  }
+  res <- data.frame(res, stringsAsFactors = FALSE)
+  colnames(res) <- c("ChampID", "ChampName")
+  return(res)
+}
+
+getMatchList <- function(accountId, APIkey, champion = NULL, queue = NULL, endTime = NULL, beginTime = NULL, endIndex = NULL, beginIndex = NULL) {
+  url <- paste0("https://kr.api.riotgames.com/lol/match/v4/matchlists/by-account/", accountId, "?")
+
+  if (!is.null(champion)) {
+    url <- paste0(url, "champion=", champion, "&")
+  }
+
+  if (!is.null(queue)) {
+    url <- paste0(url, "queue=", queue, "&")
+  }
+
+  if (!is.null(endTime)) {
+    url <- paste0(url, "endTime=", endTime, "&")
+  }
+
+  if (!is.null(beginTime)) {
+    url <- paste0(url, "beginTime=", beginTime, "&")
+  }
+
+  if (!is.null(endIndex)) {
+    url <- paste0(url, "endIndex=", endIndex, "&")
+  }
+
+  if (!is.null(beginIndex)) {
+    url <- paste0(url, "beginIndex=", beginIndex, "&")
+  }
+
+  url <- paste0(url, "api_key=", APIkey)
+
+  jsonObj <- getJSONfromURL(url)
+
+  # matches, startIndex, endIndex, totalGames
+
+  matches <- jsonObj$matches
+
+  matches <- data.frame(matrix(unlist(matches), nrow = length(matches), byrow = T), stringsAsFactors = FALSE)
+  colnames(matches) <- c("platformId", "gameId", "champion", "queue", "season", "timestamp", "role", "lane")
+  matches
+}
+
+getMatchInfo <- function(matchId, APIkey) {
+  url <- paste0("https://kr.api.riotgames.com/lol/match/v4/matches/", matchId, "?api_key=", APIkey)
+  jsonObj <- getJSONfromURL(url)
+
+  # gameDuration
+  gameDuration <- jsonObj$gameDuration
+  if (jsonObj$queueId == 420 || jsonObj$queueId == 430 || jsonObj$queueId == 440) {
+    # teams
+    # teams = jsonObj$teams
+    # Blueteam = teams[[1]]
+    # Redteam = teams[[2]]
+
+    # participants
+    participants <- jsonObj$participants
+
+    # stats = participants[[1]]$stats
+
+    getMySummonerIdx <- function(participantIdentities, accountId) {
+      for (i in 1:10) {
+        if (participantIdentities[[i]]$player$accountId == accountId) {
+          return(i)
+        }
+      }
+    }
+    res <- c()
+    # Idx = getMySummonerIdx(jsonObj$participantIdentities, accountId)
+    for (i in 1:10) {
+      p <- participants[[i]]
+      stats <- p$stats
+      timeline <- p$timeline
+      Champ <- p$championId
+      TowerDMG <- stats$damageDealtToTurrets / gameDuration
+      CounterJG <- stats$neutralMinionsKilledEnemyJungle / gameDuration
+      XPDiff <- sum(unlist(timeline$xpPerMinDeltas))
+      Win <- p$stats$win
+      res <- rbind(res, c(Champ, TowerDMG, CounterJG, XPDiff, Win, matchId))
+    }
+    res <- data.frame(res, stringsAsFactors = FALSE)
+    colnames(res) <- c("Champ", "TowerDMG", "CounterJG", "XPDiff", "Win", "matchId")
+    return(res)
+
+    {
+      # gameId
+      # platformId
+      # gameCreation
+      # queueID
+      # mapId
+      # seasonId
+      # gameVersion
+      # gameMode
+      # gameType
+      # paricipantIdentities
+
+      # largestMultiKill -> HyperCarry
+      # totalDamageDealtToChampions (/gameDuration) -> DPM -> Dealer
+      # damageDealtToTurrets (/gameDuration) -> Tower Damage -> Splitter
+      # totalDamageTaken (/gameDuration) -> DTPM -> Tanker
+      # goldEarned (/gameDuration) -> GPM -> MoneyScrapper
+
+      # turretKills, inhibitorKills -> Tower Damage -> Splitter
+      # neutralMinionsKilledEnemyJungle -> Counter Jungle -> Splitter
+
+      # firstBloodKill, firstBloodAssist -> Fast
+      # firstTowerKill, firstBloodAssist -> Fast
+
+      # timeline$xpDiffPerMinDeltas -> Splitter
+    }
+  }
+  return(c())
+}
+
+getJSONfromURL <- function(url) {
+  res <- GET(url)
+  jsonObj <- res %>%
+    read_html() %>%
+    html_text() %>%
+    jsonlite::parse_json()
+  jsonObj
+}
+
+changeIDtoName <- function(matchres) {
+  matchres$Champ <- sapply(unlist(matchres$Champ), function(i) {
+    champs[which(champs[, 1] == i), 2]
+  })
+  return(matchres)
+}
+
+getSummonersName <- function(APIkey, Tier = "I", Rank = "DIAMOND") {
+  url <- paste0("https://kr.api.riotgames.com/lol/league/v4/entries/RANKED_SOLO_5x5/", Rank, "/", Tier, "?page=1&api_key=", APIkey)
+  Summoners <- getJSONfromURL(url)
+  res <- sapply(1:length(Summoners), function(i) {
+    Summoners[[i]]$summonerName
+  })
+  return(res)
+}
+
+getPositionInfo <- function(data) {
+  d <- c()
+  for (i in 1:length(data)) {
+    if (!grepl("<a", data[i])) {
+      next
+    }
+    if (grepl("<i", data[i])) {
+      next
+    }
+    v <- strsplit(strsplit(data[i], '"')[[1]], "/")[[2]]
+
+    champName <- v[3]
+    position <- v[5]
+
+    d <- rbind(d, c(champName, position))
+  }
+  d[, 1] <- str_to_title(d[, 1])
+  d <- data.frame(d, stringsAsFactors = FALSE)
+  colnames(d) <- c("champName", "position")
+
+  return(d)
+}
+
+normalize <- function(v) {
+  (v - mean(v)) / sd(v)
+}
+
+colLab <- function(n) {
+  if (is.leaf(n)) {
+    a <- attributes(n)
+    labCol <- labelColors[clusMember[which(names(clusMember) == a$label)]]
+    attr(n, "nodePar") <- c(a$nodePar, lab.col = labCol)
+  }
+  n
+}
+
+APIkey <- "RGAPI-b588d0d9-da65-4692-a6b1-8e3fa9b68eef"
+
+myDashboardHeader <- function() {
+  shiny::div(
+    class = paste("ui top attached inverted", "#203316", " menu"),
+    style = "background-color: #203316;height : 3em;",
+    shiny::tags$a(
+      id = "toggle_menu",
+      class = "item",
+      shiny::tags$i(class = "sidebar icon"), "Menu"
+    ),
+    p("Top Solo",
+      style = "color: white;
+            width: 20em;
+            text-align: center;
+            margin: 0;
+            font-size: 2em;
+          "
+    ),
+
+    shiny::div(
+      class = "right icon menu",
+      actionButton(
+        inputId = "Githublink",
+        label = "Github",
+        icon = icon(type = "github"),
+        class = "Autobuild"
+      )
+    )
+  )
+}
+
+myDashboardSidebar <- function() {
+  shiny::div(
+    id = "uisidebar",
+    style = "min-height: 100vh; background-color: #203316;",
+    class = paste("ui", "thin", "left", "vertical", "visible", "true", "menu overlay sidebar"),
+
+    sidebarMenu(
+      menuItem(
+        tabName = "All",
+        actionButton(
+          inputId = "All", label = "All",
+          icon = icon(type = "crosshairs"), class = "Autobuild"
+        )
+      ),
+      menuItem(
+        tabName = "Groups",
+        actionButton(
+          inputId = "Groups", label = "Groups",
+          icon = icon(type = "th "), class = "Autobuild"
+        )
+      ),
+      menuItem(
+        tabName = "Cluster",
+        actionButton(
+          inputId = "Cluster", label = "Cluster",
+          icon = icon(type = "sitemap"), class = "Autobuild"
+        )
+      )
+    )
+  )
+}
+
+myDashboardBody <- function() {
+  dashboardBody(
+    tags$head(
+      tags$style(HTML("body {width:100% !important; height:100% !important;}")),
+      tags$style(HTML(".downloadButton:hover {background-color: #94cf96 !important;}")),
+      tags$style(HTML(".Autobuild:hover {background-color: #374a2c !important;}")),
+      tags$style(HTML(".downloadButton {
+                      font-size:1em;
+                      float:right;
+                      background-color : #44bd32;
+                      color : white;
+                      font-weight: 1000;
+                      padding :0.5em;}")),
+      tags$style(HTML("#toggle_menu {font-size : 1.5em; background-color:#7f8783;}")),
+      tags$style(HTML(".Blocks {
+                      color: white;
+                      width: 100%;
+                      padding: 0.5em;
+                      font-size: 1.2em;
+                      background-color: #00cec9;
+                      border: solid 0px white;
+                      }")),
+      tags$style(HTML(".Autobuild {
+                      background-color: #203316 !important;
+                      border-bottom:5px solid #94816e;
+                      text-align:left;
+                      color:white;
+                      width:100%;
+                      padding : 0.5em;
+                      font-size : 1em;
+                      cursor:pointer;
+                      border-top:none;
+                      border-right:none;
+                      border-left:none;
+                      }"))
+    ),
+    useShinyjs(),
+    # extendShinyjs(script = "download.js"),
+    tabItems(
+      tabItem(
+        tabName = "All",
+        span(
+          htmlOutput("Bubble", inline = TRUE),
+          style = "height:90%;left:5%;bottom:5%;position:absolute;width:90%; text-align:center"
+        )
+      ),
+      tabItem(
+        tabName = "Groups",
+        shiny::tags$div(
+          DTOutput("Table", height = "100%", width = "100%"),
+          style = "width : 100%; margin-top:1em;text-align : center; font-size:1em; height : 90%"
+        ),
+        shiny::tags$div(
+          plotOutput("Chart"),
+          style = "width : 100%; margin-top:1em; height:90%;"
+        )
+      ),
+      tabItem(
+        tabName = "Cluster",
+        shiny::tags$div(
+          plotOutput("Clust", height = "1000px"),
+          style = "width : 100%; margin-top:1em; height:90%;"
+        )
+      )
+    )
+  )
+}
+
+ui <- dashboardPage(
+  title = "TopSolo",
+  header = myDashboardHeader(),
+  sidebar = myDashboardSidebar(),
+  body = myDashboardBody()
+)
+
+server <- function(input, output, session) {
+
+  # load pre built statistics
+  load("D1.RData")
+
+  res$TowerDMG <- normalize(as.numeric(res$TowerDMG))
+  res$CounterJG <- normalize(as.numeric(res$CounterJG))
+  res$XPDiff <- normalize(as.numeric(res$XPDiff))
+
+  tops <- getPositionInfo(readLines("Tops.html"))
+  # Mundo Handling
+  tops$champName[which(tops$champName == "Drmundo")] <- "DrMundo"
+
+  topness <- res %>%
+    group_by(Champ, Win) %>%
+    summarise(TowerDMG = mean(TowerDMG), CounterJG = mean(CounterJG), XPDiff = mean(XPDiff)) %>%
+    filter(Champ %in% tops$champName) %>%
+    filter(Win == TRUE) %>%
+    transmute(Fun = 2 * TowerDMG + CounterJG + XPDiff) %>%
+    arrange(desc(Fun))
+
+  winrate <- res %>%
+    filter(Champ %in% tops$champName) %>%
+    group_by(Champ, Win) %>%
+    summarise(total = n()) %>%
+    group_by(Champ) %>%
+    mutate(WinRate = total / sum(total)) %>%
+    filter(Win == TRUE) %>%
+    select(-Win, -total) %>%
+    arrange(desc(WinRate))
+
+  pickrate <- res %>%
+    filter(Champ %in% tops$champName) %>%
+    group_by(Champ) %>%
+    summarise(Picked = n()) %>%
+    arrange(desc(Picked))
+  pickrate$Picked <- normalize(pickrate$Picked)
+
+  mf <- median(myres$Fun)
+  mw <- median(myres$WinRate)
+
+  groups <- sapply(1:nrow(myres), function(i) {
+    if (myres$Fun[i] > mf) {
+      if (myres$WinRate[i] > mw) {
+        return("Fun - Win")
+      }
+      return("Fun - NoWin")
+    }
+    if (myres$WinRate[i] > mw) {
+      return("NoFun - Win")
+    }
+    return("NoFun - NoWin ")
+  })
+
+  myres <- topness %>%
+    right_join(winrate) %>%
+    right_join(pickrate) %>%
+    arrange(Champ) %>%
+    cbind(Groups = groups) # 104 * 5
+
+  observeEvent(input$Githublink, {
+    shinyjs::runjs("window.open('https://github.com/jhk0530', '_blank')")
+  })
+
+  output$Bubble <- renderGvis({
+    gvisBubbleChart(
+      myres,
+      idvar = "Champ", xvar = "Fun",
+      yvar = "WinRate", colorvar = "Groups", sizevar = "Picked",
+      options = list(
+        width = "100%", height = "95%",
+        chartArea = "{left:'5%',top:'5%',width:'80%',height:'80%'}",
+        colors = "['#00bfc4', '#f8766d','#c77cff','#7cae00']",
+        hAxis = paste0("{title : 'Fun', baseline : ", mf, ", baselineColor : '#00a8ff'}"),
+        vAxis = paste0("{title : 'Win', baseline : ", mw, ", baselineColor : '#00a8ff'}"),
+        colorAxis = "{legend:{position:'none'}}",
+        bubble = '{textStyle:{color : "none" }}', # no label
+        explorer = "{}"
+      ), chartid = "BubbleChart"
+    )
+  })
+
+  champImg <- sapply(1:nrow(myres), function(i) {
+    paste0("<img style = 'width:5em' src = 'https://ddragon.leagueoflegends.com/cdn/9.24.2/img/champion/", myres$Champ[i], ".png'</img>")
+  })
+
+  myres2 <- data.frame(cbind(Image = champImg), myres)
+  myres2$Champ
+  myres2$Fun <- round(myres2$Fun, 3)
+  myres2$WinRate <- paste0(round(myres2$WinRate * 100), "%")
+  myres2$Picked <- round(myres2$Picked, 2)
+
+  output$Table <- renderDT({
+    datatable(
+      myres2,
+      rownames = FALSE,
+      extensions = c("Scroller"),
+      options = list(
+        processing = TRUE,
+        order = list(list(1, "asc")),
+        deferRender = TRUE,
+        scrollY = "39em",
+        scroller = TRUE,
+        dom = "ltipr",
+        autoWidth = TRUE
+      ),
+      selection = "single",
+      escape = FALSE
+    )
+  })
+
+  FW <- myres %>%
+    filter(Fun >= mf) %>%
+    filter(WinRate >= mw) %>%
+    arrange(desc(Picked)) # fun win
+  NFW <- myres %>%
+    filter(Fun <= mf) %>%
+    filter(WinRate >= mw) %>%
+    arrange(desc(Picked)) # no fun win
+  FNW <- myres %>%
+    filter(Fun >= mf) %>%
+    filter(WinRate <= mw) %>%
+    arrange(desc(Picked)) # fun no win
+  NFNW <- myres %>%
+    filter(Fun <= mf) %>%
+    filter(WinRate <= mw) %>%
+    arrange(desc(Picked)) # no fun no win
+
+  myres3 <- data.frame(
+    cbind(
+      round(rbind(mean(FW$Picked), mean(NFW$Picked), mean(FNW$Picked), mean(NFNW$Picked)), 3),
+      c("Fun - Win ", "NoFun - Win", "Fun - NoWin", "NoFun - NoWin")
+    ),
+    stringsAsFactors = FALSE
+  )
+  colnames(myres3) <- c("Pick", "Type")
+
+  output$Chart <- renderPlot({
+    ggplot(myres3, aes(x = Type, y = Pick, fill = Type)) +
+      geom_bar(stat = "identity", width = 0.6) +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 20),
+        axis.text.y = element_text(size = 20)
+      ) + ggtitle("EDA between Type / Pickrate")
+  })
+
+  tree <- hclust(dist(myres[, 2:4]))
+  tree$labels <- myres$Champ
+
+  labelColors <- hcl.colors(6, palette = "set 2")
+
+  clusMember <- cutree(tree, 6)
+
+  clusDendro <- dendrapply(as.dendrogram(tree), colLab)
+
+  output$Clust <- renderPlot({
+    plot(clusDendro, horiz = TRUE)
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server, options = (launch.brower <- "TRUE"))
